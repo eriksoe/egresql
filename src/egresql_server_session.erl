@@ -119,12 +119,26 @@ handle_packet(Packet, State=#state{instate=handshake}) ->
                         <<"Unsupported protocol version">>),
             error({unsupported_protocol_version, {Major, Minor}});
        true ->
-            %% Dummy failure:
-            send_packet(State, ?PG_MSGTYPE_ERROR,
-                        <<"SSeverity", 0, "MMessage", 0, "DDetail", 0, "HHint", 0, 0
->>),
+            %send_dummy_authrequest(State),
+            send_md5_authrequest(State, 16#abcd4321),
+            %send_dummy_error(State),
             State#state{instate=normal}
     end.
+
+
+%%%========== Packet types ===================================
+send_dummy_error(State) ->
+    send_packet(State, ?PG_MSGTYPE_ERROR,
+                <<"SSeverity", 0, "MMessage", 0, "DDetail", 0, "HHint", 0, 0
+>>).
+
+send_dummy_authrequest(State) ->
+    send_packet(State, ?PG_MSGTYPE_AUTHREQUEST,
+                <<?PG_AUTHREQ_OK:32>>).
+
+send_md5_authrequest(State, Salt) ->
+    send_packet(State, ?PG_MSGTYPE_AUTHREQUEST,
+                <<?PG_AUTHREQ_MD5:32, Salt:32>>).
 
 %%%========== Sending of packets ===================================
 send_packet(State, Msg) when is_binary(Msg) ->

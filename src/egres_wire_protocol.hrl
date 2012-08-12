@@ -19,4 +19,8 @@
 -define(PG_MSGTYPE_p, $p).
 
 
+-define(PG_AUTHREQ_OK, 0).
+-define(PG_AUTHREQ_MD5, 5).
+
+
 -endif.
