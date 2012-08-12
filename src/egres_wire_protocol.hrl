@@ -16,7 +16,7 @@
 -define(PG_MSGTYPE_c, $c).
 -define(PG_MSGTYPE_d, $d).
 -define(PG_MSGTYPE_f, $f).
--define(PG_MSGTYPE_p, $p).
+-define(PG_MSGTYPE_PASSWORD, $p).
 
 
 -define(PG_AUTHREQ_OK, 0).

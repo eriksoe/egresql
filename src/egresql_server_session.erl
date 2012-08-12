@@ -23,8 +23,10 @@ start_link(Socket) ->
 
 -record(state, {
           socket :: port(),
-          inbuffer = undefined :: undefined | {integer(),binary()},
-          instate = handshake :: handshake | normal
+          inbuffer = handshake :: handshake | normal | {byte(),integer(),binary()},
+          instate = handshake :: handshake | normal,
+
+          username, salt
         }).
 
 %%====================================================================
@@ -37,7 +39,9 @@ init([]) ->
     receive
         {'$init', Socket} ->
             error_logger:info_msg("Session started: ~p\n", [self()]),
-            {ok, #state{socket = Socket}}
+            {ok, #state{socket = Socket,
+                        salt=crypto:rand_bytes(4)
+                       }}
     after 5000 ->
             error_logger:error_msg("Timed out waiting for socket to be passed to process ~p\n", [self()]),
             error(timeout_waiting_for_socket_to_be_passed)
@@ -55,12 +59,12 @@ handle_cast(_Msg, State) ->
 handle_info({tcp, Sck, Data}, State=#state{socket=Sck}) ->
     error_logger:info_msg("session: got raw: ~p\n", [Data]),
     {noreply, packetize(Data, State)};
-handle_info({tcp_closed, Data}, State=#state{socket=Sck}) ->
+handle_info({tcp_closed, Sck}, State=#state{socket=Sck}) ->
     error_logger:info_msg("session closed.\n", []),
     {stop, normal, State};
-handle_info({incoming_packet, Packet}, State) when is_binary(Packet) ->
+handle_info({incoming_packet, MsgType, Packet}, State) when is_binary(Packet) ->
     error_logger:info_msg("session: got packet ~p\n", [Packet]),
-    {noreply, handle_packet(Packet, State)};
+    {noreply, handle_packet(MsgType, Packet, State)};
 handle_info(_Info, State) ->
     %% TODO: Handle {tcp,Port,Data}
     %% TODO: Handle {tcp_closed,Port}.
@@ -77,39 +81,46 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%--------------------------------------------------------------------
 
+%% TODO: Can this handle if msglen or <<msgtype,msglen>> is on a packet boundary?
 packetize(<<>>, State) -> State;
-packetize(<<TotalLen:32/big, Rest1/binary>>, State=#state{inbuffer=undefined}) ->
+packetize(<<TotalLen:32/big, Rest1/binary>>, State=#state{inbuffer=handshake}) ->
+    BodyLen = TotalLen-4,
+    %% Go to the normal case, except that the message type is 'handshake':
+    io:format("DB| packetize HSHK: ~p/~p\n", [Rest1, State#state{inbuffer={handshake,BodyLen,<<>>}}]),
+    packetize(Rest1, State#state{inbuffer={handshake,BodyLen,<<>>}});
+packetize(<<MsgType, TotalLen:32/big, Rest1/binary>>, State=#state{inbuffer=normal}) ->
     BodyLen = TotalLen-4,
     case Rest1 of
         <<Pkt:BodyLen/binary, Rest2/binary>> ->
             error_logger:info_msg("packetize case 1\n", []),
             %% Buffer ampty, got complete packet:
-            self() ! {incoming_packet, Pkt},
+            self() ! {incoming_packet, MsgType, Pkt},
             packetize(Rest2, State);
         PktPart ->
             error_logger:info_msg("packetize case 2 (bodylength=~p)\n", [BodyLen]),
             %% Buffer ampty, got incomplete packet:
-            State#state{inbuffer = {BodyLen, PktPart}}
+            State#state{inbuffer = {MsgType, BodyLen, PktPart}}
     end;
-packetize(NewData, State=#state{inbuffer={Len,BufData}}) ->
+packetize(NewData, State=#state{inbuffer={MsgType,Len,BufData}}) ->
     Take = Len - byte_size(BufData),
     case NewData of
         <<Taken:Take/binary, Rest/binary>> ->
             %% Complete packet:
             error_logger:info_msg("packetize case 3\n", []),
-            self() ! {incoming_packet, <<BufData/binary, Taken/binary>>},
-            packetize(Rest, State#state{inbuffer = undefined});
+            self() ! {incoming_packet, MsgType, <<BufData/binary, Taken/binary>>},
+            packetize(Rest, State#state{inbuffer = normal});
         Taken ->
             %% Still not enough:
             error_logger:info_msg("packetize case 4\n", []),
-            State#state{inbuffer = {Len, <<BufData/binary, Taken/binary>>}}
+            State#state{inbuffer = {MsgType, Len, <<BufData/binary, Taken/binary>>}}
     end.
 
-handle_packet(Packet, State=#state{instate=handshake}) ->
+handle_packet(handshake, Packet, State) ->
     <<Major:16, Minor:16, Rest1/binary>> = Packet,
     error_logger:info_msg("session handshake: client version is ~b:~b\n",
                           [Major, Minor]),
     ClientSettings = binary:split(Rest1, <<0>>, [global]),
+    %% TODO: Store username and database.
     error_logger:info_msg("session handshake: settings = ~p\n",
                           [ClientSettings]),
 
@@ -120,10 +131,23 @@ handle_packet(Packet, State=#state{instate=handshake}) ->
             error({unsupported_protocol_version, {Major, Minor}});
        true ->
             %send_dummy_authrequest(State),
-            send_md5_authrequest(State, 16#abcd4321),
+            %% TODO: Use salt
+            send_md5_authrequest(State, 16#30313233),
             %send_dummy_error(State),
             State#state{instate=normal}
-    end.
+    end;
+handle_packet(?PG_MSGTYPE_PASSWORD, Packet, State) ->
+    %% TODO: Use stored username and salt; get expected password from some source.
+    Expected = md5_auth(<<"erik">>,<<"password">>, <<"0123">>),
+    PwdHashLen = byte_size(Packet)-4,
+    <<"md5", InPwdHash:PwdHashLen/binary, 0>> =  Packet,
+    error_logger:info_msg("Auth response: ~p ; expected ~p ; mathes: ~p\n",
+                          [InPwdHash, Expected, InPwdHash=:=Expected]),
+    {stop, State};
+handle_packet(MsgType, Packet, State) ->
+    error_logger:error_msg("Cannot handle msgtype ~p (data ~p)\n",
+                           [[MsgType], Packet]),
+    error({unhandled_msgtype, MsgType}).
 
 
 %%%========== Packet types ===================================
@@ -149,8 +173,22 @@ send_packet(State, MsgType, Msg) when is_integer(MsgType), is_binary(Msg) ->
     Data = [MsgType, <<(byte_size(Msg)+4):32>>, Msg],
     do_send_packet(State, Data).
 
-do_send_packet(State=#state{socket=Sck}, Data) ->
+do_send_packet(#state{socket=Sck}, Data) ->
     error_logger:info_msg("session do_send_packet: ~p (~p bytes)\n", [Data, iolist_size(Data)]),
     gen_tcp:send(Sck, Data).
+
+%%%========== Authentication ===================================
+md5_auth(Username, Password, Salt) ->
+    Digest1 = crypto:md5(<<Password/binary, Username/binary>>),
+    Digest1Txt = binary_to_hex(Digest1),
+    Digest2 = crypto:md5(<<Digest1Txt/binary, Salt/binary>>),
+    binary_to_hex(Digest2).
+
+binary_to_hex(Bin) ->
+    << <<(hexchar(Hi)), (hexchar(Lo))>> || <<Hi:4, Lo:4>> <= Bin>>.
+
+hexchar(X) when X < 10 -> $0 + X;
+hexchar(X) -> $a + (X - 10).
+
 
 
