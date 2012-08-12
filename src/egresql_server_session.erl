@@ -7,6 +7,8 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-include("egres_wire_protocol.hrl").
+
 start_link(Socket) ->
     error_logger:info_msg("Session: in start_link()\n", []),
     {ok,Pid} = gen_server:start_link(?MODULE, [], []),
@@ -53,6 +55,9 @@ handle_cast(_Msg, State) ->
 handle_info({tcp, Sck, Data}, State=#state{socket=Sck}) ->
     error_logger:info_msg("session: got raw: ~p\n", [Data]),
     {noreply, packetize(Data, State)};
+handle_info({tcp_closed, Data}, State=#state{socket=Sck}) ->
+    error_logger:info_msg("session closed.\n", []),
+    {stop, normal, State};
 handle_info({incoming_packet, Packet}, State) when is_binary(Packet) ->
     error_logger:info_msg("session: got packet ~p\n", [Packet]),
     {noreply, handle_packet(Packet, State)};
@@ -107,4 +112,29 @@ handle_packet(Packet, State=#state{instate=handshake}) ->
     ClientSettings = binary:split(Rest1, <<0>>, [global]),
     error_logger:info_msg("session handshake: settings = ~p\n",
                           [ClientSettings]),
-    State#state{instate=normal}.
+
+    %% Send handshake response:
+    if {Major,Minor} /= {3,0} ->
+            send_packet(State, ?PG_MSGTYPE_ERROR,
+                        <<"Unsupported protocol version">>),
+            error({unsupported_protocol_version, {Major, Minor}});
+       true ->
+            send_packet(State, ?PG_MSGTYPE_ERROR,
+                        <<"Dummy failure :-)">>),
+            State#state{instate=normal}
+    end.
+
+%%%========== Sending of packets ===================================
+send_packet(State, Msg) when is_binary(Msg) ->
+    Data = [<<(byte_size(Msg)+4):32>>, Msg],
+    do_send_packet(State, Data).
+
+send_packet(State, MsgType, Msg) when is_integer(MsgType), is_binary(Msg) ->
+    Data = [<<(byte_size(Msg)+4):32>>, MsgType, Msg],
+    do_send_packet(State, Data).
+
+do_send_packet(State=#state{socket=Sck}, Data) ->
+    error_logger:info_msg("session do_send_packet: ~p (~p bytes)\n", [Data, iolist_size(Data)]),
+    gen_tcp:send(Sck, Data).
+
+
