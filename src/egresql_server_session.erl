@@ -141,9 +141,23 @@ handle_packet(?PG_MSGTYPE_PASSWORD, Packet, State) ->
     Expected = md5_auth(<<"erik">>,<<"password">>, <<"0123">>),
     PwdHashLen = byte_size(Packet)-4,
     <<"md5", InPwdHash:PwdHashLen/binary, 0>> =  Packet,
+    ChecksOut = InPwdHash=:=Expected,
     error_logger:info_msg("Auth response: ~p ; expected ~p ; mathes: ~p\n",
-                          [InPwdHash, Expected, InPwdHash=:=Expected]),
-    {stop, State};
+                          [InPwdHash, Expected, ChecksOut]),
+    if ChecksOut ->
+            send_authrequest_ok(State),
+            %% TODO: We don't change the state here... that's obviously wrong. This is only so because at the time being we focus on getting server and client to talk to each other.
+            %% TODO: Make the initial control flow more statemachine-like.
+            %% Send ready-signal:
+            send_packet(State, ?PG_MSGTYPE_SAVE_PARAMETER,
+                        <<"server_version",0,"1.2.3",0>>),
+            send_packet(State, ?PG_MSGTYPE_READY_FOR_QUERY,
+                        <<?PG_XACTSTATUS_IDLE>>),
+            {noreply, State};
+       true ->
+            send_auth_error(State),
+            {stop, normal, State}
+    end;
 handle_packet(MsgType, Packet, State) ->
     error_logger:error_msg("Cannot handle msgtype ~p (data ~p)\n",
                            [[MsgType], Packet]),
@@ -156,7 +170,11 @@ send_dummy_error(State) ->
                 <<"SSeverity", 0, "MMessage", 0, "DDetail", 0, "HHint", 0, 0
 >>).
 
-send_dummy_authrequest(State) ->
+send_auth_error(State) ->
+    send_packet(State, ?PG_MSGTYPE_ERROR,
+                <<"SError", 0, "MAuthentication failed.", 0, 0>>).
+
+send_authrequest_ok(State) ->
     send_packet(State, ?PG_MSGTYPE_AUTHREQUEST,
                 <<?PG_AUTHREQ_OK:32>>).
 

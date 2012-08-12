@@ -18,9 +18,23 @@
 -define(PG_MSGTYPE_f, $f).
 -define(PG_MSGTYPE_PASSWORD, $p).
 
+%% Backend -> frontend:
+%% V: Function result
+%% E: Error return
+%% A: Notify
+%% N: Notice
+%% Z: Ready for new query
+%% S: Parameter status
+-define(PG_MSGTYPE_SAVE_PARAMETER, $S).
+-define(PG_MSGTYPE_READY_FOR_QUERY, $Z).
+
 
 -define(PG_AUTHREQ_OK, 0).
 -define(PG_AUTHREQ_MD5, 5).
+
+-define(PG_XACTSTATUS_IDLE, $I).
+-define(PG_XACTSTATUS_INTRANS, $T).
+-define(PG_XACTSTATUS_INERROR, $E).
 
 
 -endif.
