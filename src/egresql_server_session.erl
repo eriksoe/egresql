@@ -119,8 +119,10 @@ handle_packet(Packet, State=#state{instate=handshake}) ->
                         <<"Unsupported protocol version">>),
             error({unsupported_protocol_version, {Major, Minor}});
        true ->
+            %% Dummy failure:
             send_packet(State, ?PG_MSGTYPE_ERROR,
-                        <<"Dummy failure :-)">>),
+                        <<"SSeverity", 0, "MMessage", 0, "DDetail", 0, "HHint", 0, 0
+>>),
             State#state{instate=normal}
     end.
 
@@ -130,7 +132,7 @@ send_packet(State, Msg) when is_binary(Msg) ->
     do_send_packet(State, Data).
 
 send_packet(State, MsgType, Msg) when is_integer(MsgType), is_binary(Msg) ->
-    Data = [<<(byte_size(Msg)+4):32>>, MsgType, Msg],
+    Data = [MsgType, <<(byte_size(Msg)+4):32>>, Msg],
     do_send_packet(State, Data).
 
 do_send_packet(State=#state{socket=Sck}, Data) ->
