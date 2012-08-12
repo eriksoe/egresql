@@ -1,0 +1,12 @@
+{application, egresql,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { egresql_app, []}},
+  {env, []}
+ ]}.
