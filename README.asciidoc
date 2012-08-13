@@ -1,0 +1,13 @@
+Egresql
+=======
+Author: Erik Søe Sørensen
+
+Egresql will be SQL server written in Erlang.
+It uses the HanoiDB storage backend, and the PostgresQL wire protocol
+for client-server communication.
+
+Status
+------
+The project is at its very infancy.
+A PostgresQL client can connect to the server and issue queries.
+Not much else works at the moment.
