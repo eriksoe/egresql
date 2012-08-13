@@ -65,10 +65,10 @@ handle_info({tcp_closed, Sck}, State=#state{socket=Sck}) ->
 handle_info({incoming_packet, MsgType, Packet}, State) when is_binary(Packet) ->
     error_logger:info_msg("session: got packet ~p\n", [Packet]),
     {noreply, handle_packet(MsgType, Packet, State)};
-handle_info(_Info, State) ->
+handle_info(_Info, State=#state{}) ->
     %% TODO: Handle {tcp,Port,Data}
     %% TODO: Handle {tcp_closed,Port}.
-    error_logger:info_msg("session: got ~p\n", [_Info]),
+    error_logger:info_msg("session: got unexpected ~p (state=~p}\n", [_Info, State]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
@@ -93,12 +93,12 @@ packetize(<<MsgType, TotalLen:32/big, Rest1/binary>>, State=#state{inbuffer=norm
     case Rest1 of
         <<Pkt:BodyLen/binary, Rest2/binary>> ->
             error_logger:info_msg("packetize case 1\n", []),
-            %% Buffer ampty, got complete packet:
+            %% Buffer empty, got complete packet:
             self() ! {incoming_packet, MsgType, Pkt},
             packetize(Rest2, State);
         PktPart ->
             error_logger:info_msg("packetize case 2 (bodylength=~p)\n", [BodyLen]),
-            %% Buffer ampty, got incomplete packet:
+            %% Buffer empty, got incomplete packet:
             State#state{inbuffer = {MsgType, BodyLen, PktPart}}
     end;
 packetize(NewData, State=#state{inbuffer={MsgType,Len,BufData}}) ->
@@ -153,11 +153,18 @@ handle_packet(?PG_MSGTYPE_PASSWORD, Packet, State) ->
                         <<"server_version",0,"1.2.3",0>>),
             send_packet(State, ?PG_MSGTYPE_READY_FOR_QUERY,
                         <<?PG_XACTSTATUS_IDLE>>),
-            {noreply, State};
+            State;
        true ->
             send_auth_error(State),
-            {stop, normal, State}
+            exit(normal)
     end;
+handle_packet(?PG_MSGTYPE_QUERY, Packet, State) ->
+    QueryLen = byte_size(Packet)-1,
+    <<Query:QueryLen/binary, 0>> =  Packet,
+    error_logger:info_msg("Got query: ~s\n", [Query]),
+    send_dummy_query_result(State),
+    send_packet(State, ?PG_MSGTYPE_READY_FOR_QUERY, <<?PG_XACTSTATUS_IDLE>>),
+    State;
 handle_packet(MsgType, Packet, State) ->
     error_logger:error_msg("Cannot handle msgtype ~p (data ~p)\n",
                            [[MsgType], Packet]),
@@ -181,6 +188,23 @@ send_authrequest_ok(State) ->
 send_md5_authrequest(State, Salt) ->
     send_packet(State, ?PG_MSGTYPE_AUTHREQUEST,
                 <<?PG_AUTHREQ_MD5:32, Salt:32>>).
+send_dummy_query_result(State) ->
+    ColCount = 1,
+    ColName = <<"column_name">>,
+    TableID = 16#4001, ColumnID = 1,
+    ColType = ?PG_TYPE_TEXT, ColSize = -1,
+    ColAttr = -1, ColFormat = 0,
+    send_packet(State, $T, <<ColCount:16,
+                             ColName/binary, 0,
+                             TableID:32, ColumnID:16,
+                             ColType:32, ColSize:16,
+                             ColAttr:32, ColFormat:16>>),
+    send_packet(State, $D,
+                <<ColCount:16, % Tuple size
+                %% Value 1:
+                4:32, % Value length
+                "foof">>),
+    send_packet(State, $C, <<"SELECT", 0>>).
 
 %%%========== Sending of packets ===================================
 send_packet(State, Msg) when is_binary(Msg) ->
