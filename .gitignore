@@ -2,3 +2,7 @@
 /ebin
 *.dump
 *~
+
+%Generated files:
+/src/egresql_lexer.erl
+/src/egresql_parser.erl
