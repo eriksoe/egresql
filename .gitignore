@@ -2,6 +2,7 @@
 /ebin
 *.dump
 *~
+/deps
 
 %Generated files:
 /src/egresql_lexer.erl
