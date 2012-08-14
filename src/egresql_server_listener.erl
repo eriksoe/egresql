@@ -19,10 +19,13 @@ start_link(Port) ->
 %% gen_server callbacks
 %%====================================================================
 
+-record(acceptor, {pid :: pid(),
+                   mref :: reference(),
+                   active :: boolean()}).
 -record(state,
         {lsocket :: port(),
          myref :: reference(),
-         acceptors :: [pid()]
+         acceptors :: [#acceptor{}]
         }).
 
 init({Port}) ->
@@ -34,7 +37,8 @@ init({Port}) ->
             State1 = #state{lsocket = LSocket,
                             myref = make_ref(),
                             acceptors = []},
-            State2 = start_acceptor(State1),
+            %% Start a couple of acceptors:
+            State2 = start_acceptor(start_acceptor(State1)),
             {ok, State2};
         {error, Reason} ->
             error_logger:error_msg("Listener: listen() on port ~p failed: ~p\n", [Port,Reason]),
@@ -49,23 +53,38 @@ handle_cast(Msg, State) ->
     error_logger:error_msg("~s: Got unexpected cast: ~p\n", [?MODULE, Msg]),
     {noreply, State}.
 
-handle_info({accepted, Ref}, State=#state{myref=MyRef}) when Ref=:=MyRef ->
+handle_info({accepted, Ref, Pid}, State=#state{myref=MyRef, acceptors=Accs})
+  when Ref=:=MyRef ->
     %% Got incoming connection - acceptor is taken now.
     error_logger:info_msg("Acceptor got one\n", []),
-    State2 = start_acceptor(State),
-    {noreply, State2};
+    case lists:keytake(Pid, #acceptor.pid, Accs) of
+        {value, AccRec, Accs2} ->
+            Accs3 = [AccRec#acceptor{active=true} | Accs2],
+            State2 = start_acceptor(State#state{acceptors=Accs3}),
+            {noreply, State2};
+        false ->
+            error_logger:error_msg("~s: Unexpected state: got 'accepted' for unknown acceptor ~p\n",
+                                   [?MODULE, Pid]),
+            {noreply, State}
+        end;
 handle_info({'DOWN', _MRef, process, Pid, Reason}, State=#state{acceptors=Acceptors}) ->
     error_logger:info_msg("~s: Got DOWN message.\n", [?MODULE]),
-    case lists:member(Pid, Acceptors) of
-        true ->
+    case lists:keyfind(Pid, #acceptor.pid, Acceptors) of
+        #acceptor{active=WasActive} ->
             %% Acceptor disappeared for some reason.
-            error_logger:info_msg("Acceptor went away\n", []),
+            error_logger:info_msg("~s: Acceptor ~p went away (was active: ~p)\n",
+                                  [?MODULE, Pid, WasActive]),
             %% Clean up:
-            State1 = State#state{acceptors=lists:delete(Pid, Acceptors)},
+            State1 = State#state{acceptors=lists:keydelete(Pid, #acceptor.pid, Acceptors)},
             unlink(Pid),
             receive {'EXIT', Pid, _} -> ok after 0 -> ok end,
-            %% Replace the acceptor:
-            State2 = start_acceptor(State1),
+
+            if not WasActive ->
+                    %% Replace the acceptor:
+                    State2 = start_acceptor(State1);
+               true ->
+                    State2 = State1
+            end,
             {noreply, State2};
         false ->
             error_logger:info_msg("~s: Got spurious DOWN from ~p\n", [?MODULE, Pid]),
@@ -74,7 +93,7 @@ handle_info({'DOWN', _MRef, process, Pid, Reason}, State=#state{acceptors=Accept
 handle_info({'EXIT', Pid, Reason}, State=#state{acceptors=Acceptors}) ->
     error_logger:warning_msg("~s: Got unexpected exit from ~p: ~p\n",
                              [?MODULE, Pid, Reason]),
-    IsAcceptor = lists:member(Pid, Acceptors),
+    IsAcceptor = lists:keymember(Pid, #acceptor.pid, Acceptors),
     if IsAcceptor;
        Reason==normal ->
             {noreply, State};
@@ -102,13 +121,17 @@ code_change(_OldVsn, State, _Extra) ->
 
 start_acceptor(State=#state{lsocket=LSocket,
                             myref=Ref,
-                           acceptors=Acceptors}) ->
-    process_flag(trap_exit, true),
+                            acceptors=WAcceptors}) ->
+    error_logger:info_msg("~s: Starting acceptor #~b.\n",
+                          [?MODULE, 1+length(WAcceptors)]),
     Me = self(),
     SocketFun = fun() -> {ok, Socket} = gen_tcp:accept(LSocket),
-                         Me ! {accepted, Ref},
+                         Me ! {accepted, Ref, self()},
                          Socket
                 end,
     {ok, AcceptorPid} = egresql_server_session:start_link(SocketFun),
-    _Mref = erlang:monitor(process, AcceptorPid),
-    State#state{acceptors = [AcceptorPid | Acceptors]}.
+    MRef = erlang:monitor(process, AcceptorPid),
+    AcceptorRecord = #acceptor{pid = AcceptorPid,
+                               mref = MRef,
+                               active = false},
+    State#state{acceptors = [AcceptorRecord | WAcceptors]}.
