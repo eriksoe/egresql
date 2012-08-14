@@ -1,4 +1,5 @@
 -module(egresql_server_session).
+-behaviour(gen_server).
 
 %% API
 -export([start_link/1]).
@@ -57,12 +58,11 @@ handle_info({incoming_packet, MsgType, Packet}, State) when is_binary(Packet) ->
     error_logger:info_msg("session: got packet ~p\n", [Packet]),
     {noreply, handle_packet(MsgType, Packet, State)};
 handle_info(_Info, State=#state{}) ->
-    %% TODO: Handle {tcp,Port,Data}
-    %% TODO: Handle {tcp_closed,Port}.
     error_logger:info_msg("session: got unexpected ~p (state=~p}\n", [_Info, State]),
     {noreply, State}.
 
-terminate(_Reason, _State) ->
+terminate(Reason, _State) ->
+    error_logger:error_msg("~s closed: ~p\n", [?MODULE, Reason]),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -208,7 +208,9 @@ send_packet(State, MsgType, Msg) when is_integer(MsgType), is_binary(Msg) ->
 
 do_send_packet(#state{socket=Sck}, Data) ->
     error_logger:info_msg("session do_send_packet: ~p (~p bytes)\n", [Data, iolist_size(Data)]),
-    gen_tcp:send(Sck, Data).
+    gen_tcp:send(Sck, Data),
+    error_logger:info_msg("session do_send_packet: sent.\n", []),
+    ok.
 
 %%%========== Authentication ===================================
 md5_auth(Username, Password, Salt) ->
