@@ -3,6 +3,7 @@
 *.dump
 *~
 /deps
+*.egres
 
 %Generated files:
 /src/egresql_lexer.erl

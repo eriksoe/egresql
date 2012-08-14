@@ -24,6 +24,7 @@ start_link(SocketFun) ->
           inbuffer = handshake :: handshake | normal | {byte(),integer(),binary()},
           instate = handshake :: handshake | normal,
 
+          database_name, database_pid,
           username, salt
         }).
 
@@ -110,42 +111,49 @@ handle_packet(handshake, Packet, State) ->
     <<Major:16, Minor:16, Rest1/binary>> = Packet,
     error_logger:info_msg("session handshake: client version is ~b:~b\n",
                           [Major, Minor]),
-    ClientSettings = binary:split(Rest1, <<0>>, [global]),
+    ClientParams = binary:split(Rest1, <<0>>, [global]),
     %% TODO: Store username and database.
     error_logger:info_msg("session handshake: settings = ~p\n",
-                          [ClientSettings]),
+                          [ClientParams]),
+    State2 = remember_client_params(ClientParams, State),
 
     %% Send handshake response:
     if {Major,Minor} /= {3,0} ->
-            send_packet(State, ?PG_MSGTYPE_ERROR,
+            send_packet(State2, ?PG_MSGTYPE_ERROR,
                         <<"Unsupported protocol version">>),
             error({unsupported_protocol_version, {Major, Minor}});
        true ->
-            %send_dummy_authrequest(State),
+            %send_dummy_authrequest(State2),
             %% TODO: Use salt
-            send_md5_authrequest(State, 16#30313233),
-            %send_dummy_error(State),
-            State#state{instate=normal}
+            send_md5_authrequest(State2, State2#state.salt),
+            %send_dummy_error(State2),
+            State2#state{instate=normal}
     end;
 handle_packet(?PG_MSGTYPE_PASSWORD, Packet, State) ->
-    %% TODO: Use stored username and salt; get expected password from some source.
-    Expected = md5_auth(<<"erik">>,<<"password">>, <<"0123">>),
+    %% Parse:
     PwdHashLen = byte_size(Packet)-4,
-    <<"md5", InPwdHash:PwdHashLen/binary, 0>> =  Packet,
-    ChecksOut = InPwdHash=:=Expected,
-    error_logger:info_msg("Auth response: ~p ; expected ~p ; mathes: ~p\n",
-                          [InPwdHash, Expected, ChecksOut]),
-    if ChecksOut ->
+    <<"md5", InPwdHash:PwdHashLen/binary, 0>> = Packet,
+
+    %% Ask:
+    AuthResult = egresql_server_auth:authenticate_by_md5(
+                   State#state.database_name,
+                   State#state.username,
+                   State#state.salt,
+                   InPwdHash),
+
+    error_logger:info_msg("Auth response: ~p ; authresult: ~p\n",
+                          [InPwdHash, AuthResult]),
+    case AuthResult of
+        {ok, DBPid} ->
             send_authrequest_ok(State),
-            %% TODO: We don't change the state here... that's obviously wrong. This is only so because at the time being we focus on getting server and client to talk to each other.
             %% TODO: Make the initial control flow more statemachine-like.
             %% Send ready-signal:
             send_packet(State, ?PG_MSGTYPE_SAVE_PARAMETER,
                         <<"server_version",0,"1.2.3",0>>),
             send_packet(State, ?PG_MSGTYPE_READY_FOR_QUERY,
                         <<?PG_XACTSTATUS_IDLE>>),
-            State;
-       true ->
+            State#state{database_pid=DBPid};
+        false ->
             send_auth_error(State),
             exit(normal)
     end;
@@ -180,7 +188,7 @@ send_authrequest_ok(State) ->
 
 send_md5_authrequest(State, Salt) ->
     send_packet(State, ?PG_MSGTYPE_AUTHREQUEST,
-                <<?PG_AUTHREQ_MD5:32, Salt:32>>).
+                <<?PG_AUTHREQ_MD5:32, Salt/binary>>).
 send_dummy_query_result(State) ->
     ColCount = 1,
     ColName = <<"column_name">>,
@@ -214,18 +222,21 @@ do_send_packet(#state{socket=Sck}, Data) ->
     error_logger:info_msg("session do_send_packet: sent.\n", []),
     ok.
 
-%%%========== Authentication ===================================
-md5_auth(Username, Password, Salt) ->
-    Digest1 = crypto:md5(<<Password/binary, Username/binary>>),
-    Digest1Txt = binary_to_hex(Digest1),
-    Digest2 = crypto:md5(<<Digest1Txt/binary, Salt/binary>>),
-    binary_to_hex(Digest2).
+%%%========== State management ============================================
 
-binary_to_hex(Bin) ->
-    << <<(hexchar(Hi)), (hexchar(Lo))>> || <<Hi:4, Lo:4>> <= Bin>>.
+remember_client_params(RawClientParams, State) ->
+    ClientParams = pair_up_client_params(RawClientParams, []),
+    case {lists:keyfind(<<"database">>, 1, ClientParams),
+          lists:keyfind(<<"user">>, 1, ClientParams)} of
+        {false, _} -> error({no_database_param_supplied, ClientParams});
+        {_, false} -> error({no_username_param_supplied, ClientParams});
+        {{_,DatabaseName}, {_,UserName}} ->
+            State#state{database_name=DatabaseName, username=UserName}
+    end.
 
-hexchar(X) when X < 10 -> $0 + X;
-hexchar(X) -> $a + (X - 10).
+pair_up_client_params([<<>>, <<>>], Acc) -> Acc;
+pair_up_client_params([Key, Value | Rest], Acc) ->
+    pair_up_client_params(Rest, [{Key, Value} | Acc]).
 
 
 
