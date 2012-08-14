@@ -156,6 +156,8 @@ handle_packet(?PG_MSGTYPE_QUERY, Packet, State) ->
     send_dummy_query_result(State),
     send_packet(State, ?PG_MSGTYPE_READY_FOR_QUERY, <<?PG_XACTSTATUS_IDLE>>),
     State;
+handle_packet(?PG_MSGTYPE_GOODBYE, <<>>, State) ->
+    exit(normal);
 handle_packet(MsgType, Packet, State) ->
     error_logger:error_msg("Cannot handle msgtype ~p (data ~p)\n",
                            [[MsgType], Packet]),

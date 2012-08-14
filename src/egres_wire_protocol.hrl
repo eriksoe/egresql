@@ -36,6 +36,7 @@
 -define(PG_MSGTYPE_SAVE_PARAMETER, $S).
 -define(PG_MSGTYPE_READY_FOR_QUERY, $Z).
 -define(PG_MSGTYPE_RESULT_VALUE, $V).
+-define(PG_MSGTYPE_GOODBYE, $X).                % Client -> server
 
 
 -define(PG_AUTHREQ_OK, 0).
