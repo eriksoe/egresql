@@ -13,7 +13,7 @@
          terminate/2, code_change/3]).
 
 -record(state, {
-          file :: port()
+          db :: hanoidb:hanoidb()
          }).
 -define(SERVER, ?MODULE).
 
@@ -29,9 +29,15 @@ start_link(Filename) ->
 %%====================================================================
 
 init({Filename}) ->
-    {ok, #state{
-       file = undefined                         %TODO
-      }}.
+    try hanoidb:open(Filename) of
+        DB ->
+            {ok, #state{db = DB}}
+    catch _:Reason ->
+            error_logger:error_msg("~s: Could not open database ~s: ~p\n** Trace: ~p\n",
+                                   [?MODULE, Filename, Reason, erlang:get_stacktrace()]),
+            {error, {could_not_open_database, Reason}}
+    end.
+
 handle_call(Request, From, State) ->
     error_logger:error_msg("~s: Got unexpected call from ~p: ~p\n", [?MODULE, From, Request]),
     {noreply, State}.

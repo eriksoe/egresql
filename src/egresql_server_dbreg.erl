@@ -97,8 +97,9 @@ is_valid_database_name(DBName) ->
 
 check_file_accessibility(Filename) ->
     case file:read_file_info(Filename) of
-        {ok, #file_info{access=read_write}} -> ok;
-        {ok, #file_info{}}                  -> {error, eaccess};
-        {error, _}=Err                      -> Err
+        {ok, #file_info{access=X}} when X/=read_write -> {error, eaccess};
+        {ok, #file_info{type=X}}   when X/=directory  -> {error, enotdir};
+        {ok, #file_info{}} -> ok;
+        {error, _}=Err -> Err
     end.
 
