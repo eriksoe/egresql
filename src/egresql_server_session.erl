@@ -9,12 +9,9 @@
 
 -include("egres_wire_protocol.hrl").
 
-start_link(Socket) ->
+start_link(SocketFun) ->
     error_logger:info_msg("Session: in start_link()\n", []),
-    {ok,Pid} = gen_server:start_link(?MODULE, [], []),
-    error_logger:info_msg("Session: after spawn\n", []),
-    ok = gen_tcp:controlling_process(Socket, Pid),
-    Pid ! {'$init', Socket},
+    {ok,Pid} = gen_server:start_link(?MODULE, [SocketFun], []),
     {ok,Pid}.
 
 %%====================================================================
@@ -33,19 +30,13 @@ start_link(Socket) ->
 %% gen_server callbacks
 %%====================================================================
 
-init([]) ->
+init([SocketFun]) ->
     error_logger:info_msg("Session: in init()\n", []),
-    proc_lib:init_ack({ok, self()}),
-    receive
-        {'$init', Socket} ->
-            error_logger:info_msg("Session started: ~p\n", [self()]),
-            {ok, #state{socket = Socket,
-                        salt=crypto:rand_bytes(4)
-                       }}
-    after 5000 ->
-            error_logger:error_msg("Timed out waiting for socket to be passed to process ~p\n", [self()]),
-            error(timeout_waiting_for_socket_to_be_passed)
-    end.
+    Socket = SocketFun(),
+    error_logger:info_msg("Session: got a connection; ~p\n", [Socket]),
+    {ok, #state{socket = Socket,
+                salt=crypto:rand_bytes(4)
+               }}.
 
 handle_call(_Request, _From, State) ->
     error_logger:info_msg("session: got call ~p\n", [_Request]),
