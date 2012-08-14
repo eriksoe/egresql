@@ -29,6 +29,10 @@ init({ServerPort}) ->
            %% {Id,StartFunc,Restart,Shutdown,Type,Modules}
            {egresql_server_listener,
             {egresql_server_listener, start_link, [ServerPort]},
-            permanent, 5000, worker, [egresql_server_listener]}
+            permanent, 5000, worker, [egresql_server_listener]},
+
+           {egresql_server_dbreg,
+            {egresql_server_dbreg, start_link, []},
+            permanent, 5000, worker, [egresql_server_dbreg]}
           ]} }.
 
