@@ -13,7 +13,7 @@ string_encode_decode_test() -> ?assert(triq:check(prop_string_encode_decode(), 2
 string_encode_order_test()  -> ?assert(triq:check(prop_string_encode_order(),  2000)).
 string_encode_tail_test()  -> ?assert(triq:check(prop_string_encode_tail(), 2000)).
 
-%%======================================================================
+%%%======================================================================
 prop_int_encode_decode() ->
     ?FORALL(X, integer_or_null(),
          begin
@@ -95,3 +95,27 @@ integer() ->
 string_or_null() ->
     frequency([{1,null}, {40,binary()}]).
 
+
+%%%======================================================================
+
+integer_encoding_speed_test() ->
+    encoding_speed_test_aux(integer_or_null(), integer).
+
+string_encoding_speed_test()  ->
+    encoding_speed_test_aux(string_or_null(), string).
+
+encoding_speed_test_aux(Gen, Type) ->
+    N = 25000,
+    Inputs = [null] ++ [element(2,triq_dom:pick(Gen, 25)) || _ <- lists:seq(1,N)],
+    T1 = os:timestamp(),
+    Encoded = lists:map(fun (V) -> egresql_key_encoding:encode(Type,V) end,
+                        Inputs),
+    T2 = os:timestamp(),
+    _Decoded = lists:map(fun (V) -> egresql_key_encoding:decode(Type,V) end,
+                        Encoded),
+    T3 = os:timestamp(),
+    io:format(user, "encoding_speed_test for type ~s: encoding ~.1f/s, decoding ~.1f/s\n",
+              [Type,
+               (N*1.0e6) / timer:now_diff(T2,T1),
+               (N*1.0e6) / timer:now_diff(T3,T2)]),
+    ok.

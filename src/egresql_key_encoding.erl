@@ -53,12 +53,30 @@ decode_int(<<16#84, N:32/unsigned, Rest/binary>>) -> {N, Rest}.
 %%% - <<1>> is encoded as <<1,3>>.
 %%% - all other bytes as encoded as-are.
 
+%%% Slower versions:
+% encode_string(null) -> <<>>;
+% encode_string(<<>>) -> <<1,1>>;
+% encode_string(V) ->
+%     V2 = binary:replace(V,  <<1>>, <<1,3>>, [global]),
+%     V3 = binary:replace(V2, <<0>>, <<1,2>>, [global]),
+%     V3.
+% 
+% encode_string2(null) -> <<>>;
+% encode_string2(<<>>) -> <<1,1>>;
+% encode_string2(V) ->
+%     << << (case X of 0 -> <<1,2>>; 1 -> <<1,3>>; _ -> <<X>> end)/binary>> || <<X>> <= V>>.
+
 encode_string(null) -> <<>>;
 encode_string(<<>>) -> <<1,1>>;
-encode_string(V) ->
-    V2 = binary:replace(V,  <<1>>, <<1,3>>, [global]),
-    V3 = binary:replace(V2, <<0>>, <<1,2>>, [global]),
-    V3.
+encode_string(V) -> encode_string(V, <<>>).
+
+encode_string(<<>>, Acc) -> Acc;
+encode_string(<<0, Rest/binary>>, Acc) when is_binary(Acc) ->
+    encode_string(Rest, <<Acc/binary, 1, 2>>);
+encode_string(<<1, Rest/binary>>, Acc) when is_binary(Acc) ->
+    encode_string(Rest, <<Acc/binary, 1, 3>>);
+encode_string(<<X, Rest/binary>>, Acc) when is_binary(Acc) ->
+    encode_string(Rest, <<Acc/binary, X>>).
 
 decode_string(<<>>) -> {null, <<>>};
 decode_string(<<0, _/binary>>=Rest) -> {null, Rest};
@@ -68,7 +86,46 @@ decode_string(V) ->
         [V1]       -> Rest = <<>>;
         [V1,Rest1] -> Rest = <<0, Rest1/binary>>
     end,
-    V2 = binary:replace(V1, <<1,2>>, <<0>>, [global]),
-    V3 = binary:replace(V2, <<1,3>>, <<1>>, [global]),
-    {V3, Rest}.
+    {decode_string_loop(V1, <<>>), Rest}.
+
+decode_string_loop(<<>>, Acc) ->
+    Acc;
+decode_string_loop(V, Acc) when is_binary(Acc) ->
+    case binary:split(V, <<1>>) of
+        [V1] -> <<Acc/binary, V1/binary>>;
+        [V1, <<2,Rest/binary>>] -> decode_string_loop(Rest, <<Acc/binary, V1/binary, 0>>);
+        [V1, <<3,Rest/binary>>] -> decode_string_loop(Rest, <<Acc/binary, V1/binary, 1>>)
+    end.
+
+%%% Slower versions:
+
+%decode_string1(<<>>) -> {null, <<>>};
+%decode_string1(<<0, _/binary>>=Rest) -> {null, Rest};
+%decode_string1(<<1,1, Rest/binary>>) -> {<<>>, Rest};
+%decode_string1(V) ->
+%    case binary:split(V, <<0>>) of
+%        [V1]       -> Rest = <<>>;
+%        [V1,Rest1] -> Rest = <<0, Rest1/binary>>
+%    end,
+%    V2 = binary:replace(V1, <<1,2>>, <<0>>, [global]),
+%    V3 = binary:replace(V2, <<1,3>>, <<1>>, [global]),
+%    {V3, Rest}.
+%
+% decode_string2(<<>>) -> {null, <<>>};
+% decode_string2(<<0, _/binary>>=Rest) -> {null, Rest};
+% decode_string2(<<1,1, Rest/binary>>) -> {<<>>, Rest};
+% decode_string2(V) -> decode_string2(V, <<>>).
+%
+% decode_string2(<<>>=V, Acc) when is_binary(Acc) ->
+%     {Acc, V};
+% decode_string2(<<0, _/binary>>=V, Acc) when is_binary(Acc) ->
+%     {Acc, V};
+% decode_string2(<<1,2, Rest/binary>>, Acc) when is_binary(Acc) ->
+%     decode_string2(Rest, <<Acc/binary, 0>>);
+% decode_string2(<<1,3, Rest/binary>>, Acc) when is_binary(Acc) ->
+%     decode_string2(Rest, <<Acc/binary, 1>>);
+% decode_string2(<<1,Rest/binary>>, Acc) when is_binary(Acc) ->
+%     error({bad_encoded_string_escape, Rest});
+% decode_string2(<<X,Rest/binary>>, Acc) when is_binary(Acc) ->
+%     decode_string2(Rest, <<Acc/binary, X>>).
 
