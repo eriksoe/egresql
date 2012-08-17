@@ -107,6 +107,11 @@ string_encoding_speed_test()  ->
 encoding_speed_test_aux(Gen, Type) ->
     N = 25000,
     Inputs = [null] ++ [element(2,triq_dom:pick(Gen, 25)) || _ <- lists:seq(1,N)],
+    TotalSize = case Type of
+                    string ->lists:sum([case X of null->1; _ -> byte_size(X) end || X <- Inputs]);
+                    integer -> 4 * N;
+                    _ -> undefined
+                end,
     T1 = os:timestamp(),
     Encoded = lists:map(fun (V) -> egresql_key_encoding:encode(Type,V) end,
                         Inputs),
@@ -118,4 +123,13 @@ encoding_speed_test_aux(Gen, Type) ->
               [Type,
                (N*1.0e6) / timer:now_diff(T2,T1),
                (N*1.0e6) / timer:now_diff(T3,T2)]),
+    case TotalSize of
+        undefined -> ok;
+        _ ->
+            Megabytes = TotalSize / (1024 * 1024.0),
+            io:format(user, "encoding_speed_test for type ~s: encoding ~.1f MB/s, decoding ~.1f MB/s\n",
+                      [Type,
+                       Megabytes / (timer:now_diff(T2,T1) * 1.0e-6),
+                       Megabytes / (timer:now_diff(T3,T2) * 1.0e-6)])
+    end,
     ok.
