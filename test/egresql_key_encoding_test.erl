@@ -5,10 +5,16 @@
 
 -compile(export_all).
 
-encode_decode_test() -> ?assert(triq:check(prop_encode_decode(), 10000)).
-encode_order_test()  -> ?assert(triq:check(prop_encode_order(),  20000)).
+int_encode_decode_test() -> ?assert(triq:check(prop_int_encode_decode(), 10000)).
+int_encode_order_test()  -> ?assert(triq:check(prop_int_encode_order(),  20000)).
+int_encode_tail_test()  -> ?assert(triq:check(prop_int_encode_tail(), 1000)).
 
-prop_encode_decode() ->
+string_encode_decode_test() -> ?assert(triq:check(prop_string_encode_decode(), 2000)).
+string_encode_order_test()  -> ?assert(triq:check(prop_string_encode_order(),  2000)).
+string_encode_tail_test()  -> ?assert(triq:check(prop_string_encode_tail(), 2000)).
+
+%%======================================================================
+prop_int_encode_decode() ->
     ?FORALL(X, integer_or_null(),
          begin
              egresql_key_encoding:decode(integer,
@@ -16,17 +22,55 @@ prop_encode_decode() ->
                  == {X, <<>>}
          end).
 
-prop_encode_order() ->
+prop_int_encode_order() ->
     ?FORALL({X,Y}, {integer_or_null(), integer_or_null()},
             expected_int_order(X,Y) =:=
             binary_order(egresql_key_encoding:encode(integer, X),
                          egresql_key_encoding:encode(integer, Y))).
+
+prop_int_encode_tail() ->
+    ?FORALL({X,T}, {integer_or_null(), binary()},
+            egresql_key_encoding:decode(integer,
+               <<(egresql_key_encoding:encode(integer, X))/binary,
+                 T/binary>>)
+            =:= {X, T}).
+
+
+%%%----------------------------------------
+prop_string_encode_decode() ->
+    ?FORALL(X, string_or_null(),
+         begin
+             egresql_key_encoding:decode(string,
+               egresql_key_encoding:encode(string, X))
+                 == {X, <<>>}
+         end).
+
+prop_string_encode_order() ->
+    ?FORALL({X,Y}, {string_or_null(), string_or_null()},
+            expected_string_order(X,Y) =:=
+            binary_order(egresql_key_encoding:encode(string, X),
+                         egresql_key_encoding:encode(string, Y))).
+
+prop_string_encode_tail() ->
+    ?FORALL({X,T}, {string_or_null(), binary()},
+            egresql_key_encoding:decode(string,
+               <<(egresql_key_encoding:encode(string, X))/binary,
+                 0, T/binary>>)
+            =:= {X, <<0, T/binary>>}).
+
+%%======================================================================
 
 expected_int_order(X, X) -> eq;
 expected_int_order(null, _) -> lt;
 expected_int_order(_, null) -> gt;
 expected_int_order(X, Y) when X<Y -> lt;
 expected_int_order(X, Y) when X>Y -> gt.
+
+expected_string_order(X, X) -> eq;
+expected_string_order(null, _) -> lt;
+expected_string_order(_, null) -> gt;
+expected_string_order(X, Y) when X<Y -> lt;
+expected_string_order(X, Y) when X>Y -> gt.
 
 binary_order(X,X) when is_binary(X) -> eq;
 binary_order(X,Y) when is_binary(X), is_binary(Y), X<Y -> lt;
@@ -48,4 +92,6 @@ integer() ->
               end).
 
 
+string_or_null() ->
+    frequency([{1,null}, {40,binary()}]).
 
