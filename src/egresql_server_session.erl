@@ -161,7 +161,16 @@ handle_packet(?PG_MSGTYPE_QUERY, Packet, State) ->
     QueryLen = byte_size(Packet)-1,
     <<Query:QueryLen/binary, 0>> =  Packet,
     error_logger:info_msg("Got query: ~s\n", [Query]),
-    send_dummy_query_result(State),
+    QueryStr = binary_to_list(Query),
+    try parse_commands(QueryStr) of
+        ParsedQuery ->
+            error_logger:info_msg("Parsed query: ~p\n", [ParsedQuery]),
+            ResText = list_to_binary(io_lib:format("~w", [ParsedQuery])),
+            send_dummy_query_result(State, ResText)
+    catch _:ParseError ->
+            error_logger:warning_msg("Fail to parse query: ~p\n", [ParseError]),
+            send_dummy_error(State)
+    end,
     send_packet(State, ?PG_MSGTYPE_READY_FOR_QUERY, <<?PG_XACTSTATUS_IDLE>>),
     State;
 handle_packet(?PG_MSGTYPE_GOODBYE, <<>>, State) ->
@@ -189,7 +198,8 @@ send_authrequest_ok(State) ->
 send_md5_authrequest(State, Salt) ->
     send_packet(State, ?PG_MSGTYPE_AUTHREQUEST,
                 <<?PG_AUTHREQ_MD5:32, Salt/binary>>).
-send_dummy_query_result(State) ->
+
+send_dummy_query_result(State, Text) ->
     ColCount = 1,
     ColName = <<"column_name">>,
     TableID = 16#4001, ColumnID = 1,
@@ -200,11 +210,12 @@ send_dummy_query_result(State) ->
                              TableID:32, ColumnID:16,
                              ColType:32, ColSize:16,
                              ColAttr:32, ColFormat:16>>),
+    TextLen = byte_size(Text),
     send_packet(State, $D,
                 <<ColCount:16, % Tuple size
-                %% Value 1:
-                4:32, % Value length
-                "foof">>),
+                  %% Value 1:
+                  TextLen:32, % Value length
+                  Text/binary>>),
     send_packet(State, $C, <<"SELECT", 0>>).
 
 %%%========== Sending of packets ===================================
@@ -239,4 +250,8 @@ pair_up_client_params([Key, Value | Rest], Acc) ->
     pair_up_client_params(Rest, [{Key, Value} | Acc]).
 
 
-
+%%%==================== Parsing ========================================
+parse_commands(Str) ->
+    {ok, Tokens, _EndLine} = egresql_lexer:string(Str),
+    {ok, Parsed} = egresql_parser:parse(Tokens),
+    Parsed.

@@ -13,7 +13,7 @@ Rules.
 % TODO: Floating-point numbers.
 
 % Single-character operators:
-([+-/<=>;]|\*) : {token, {list_to_atom(TokenChars), TokenLine}}.
+([+-/<=>;()]|\*) : {token, {list_to_atom(TokenChars), TokenLine}}.
 
 Erlang code.
 keyword_list() ->
