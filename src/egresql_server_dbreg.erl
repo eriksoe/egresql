@@ -44,7 +44,12 @@ handle_call({get_database, DBName}, _From, State=#state{dbtable=Table}) ->
             Result = {ok,Pid};
         [] ->
             %% That database is not yet known. Try to open it:
-            Result = get_new_database(DBName, State)
+            case Result=get_new_database(DBName, State) of
+                {ok,Pid} ->
+                    ets:insert(Table, {DBName, Pid});
+                {error,_} ->
+                    ok
+            end
     end,
     {reply, Result, State};
 handle_call(Request, From, State) ->
