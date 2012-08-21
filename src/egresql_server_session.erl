@@ -163,11 +163,15 @@ handle_packet(?PG_MSGTYPE_QUERY, Packet, State) ->
     error_logger:info_msg("Got query: ~s\n", [Query]),
     QueryStr = binary_to_list(Query),
     try parse_commands(QueryStr) of
-        ParsedQuery ->
+        {ok, ParsedQuery} ->
             error_logger:info_msg("Parsed query: ~p\n", [ParsedQuery]),
             ResText = list_to_binary(io_lib:format("~w", [ParsedQuery])),
-            send_dummy_query_result(State, ResText)
-    catch _:ParseError ->
+            send_dummy_query_result(State, ResText);
+        {parse_error, Line, ErrMsg} ->
+            ResText = list_to_binary(io_lib:format("In line ~b: ~s", [Line, ErrMsg])),
+            send_error(State, <<"Error">>, ResText, [])
+    catch
+        _:ParseError ->
             error_logger:warning_msg("Fail to parse query: ~p\n", [ParseError]),
             send_dummy_error(State)
     end,
@@ -182,6 +186,13 @@ handle_packet(MsgType, Packet, State) ->
 
 
 %%%========== Packet types ===================================
+send_error(State, Severity, Message, Extra) ->
+    %% TODO: Handle extras (details, hints, etc.)
+    send_packet(State, ?PG_MSGTYPE_ERROR,
+                <<"S", Severity/binary, 0,
+                  "M", Message/binary, 0,
+                  0>>).
+
 send_dummy_error(State) ->
     send_packet(State, ?PG_MSGTYPE_ERROR,
                 <<"SSeverity", 0, "MMessage", 0, "DDetail", 0, "HHint", 0, 0
@@ -252,6 +263,14 @@ pair_up_client_params([Key, Value | Rest], Acc) ->
 
 %%%==================== Parsing ========================================
 parse_commands(Str) ->
-    {ok, Tokens, _EndLine} = egresql_lexer:string(Str),
-    {ok, Parsed} = egresql_parser:parse(Tokens),
-    Parsed.
+    case egresql_lexer:string(Str) of
+        {ok, Tokens, _EndLine} ->
+            case egresql_parser:parse(Tokens) of
+                    {ok, Parsed} ->
+                    {ok, Parsed};
+                {error, {Line, _, Chars}} ->
+                    {parse_error, Line, lists:flatten(io_lib:format("~s", [Chars]))}
+            end;
+        {error, {Line, _, {illegal, Chars}},_} ->
+            {parse_error, Line, lists:flatten(io_lib:format("illegal token: ~s", [Chars]))}
+    end.
