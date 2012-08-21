@@ -177,16 +177,16 @@ handle_packet(?PG_MSGTYPE_QUERY, Packet, State) ->
     end,
     send_packet(State, ?PG_MSGTYPE_READY_FOR_QUERY, <<?PG_XACTSTATUS_IDLE>>),
     State;
-handle_packet(?PG_MSGTYPE_GOODBYE, <<>>, State) ->
+handle_packet(?PG_MSGTYPE_GOODBYE, <<>>, _State) ->
     exit(normal);
-handle_packet(MsgType, Packet, State) ->
+handle_packet(MsgType, Packet, _State) ->
     error_logger:error_msg("Cannot handle msgtype ~p (data ~p)\n",
                            [[MsgType], Packet]),
     error({unhandled_msgtype, MsgType}).
 
 
 %%%========== Packet types ===================================
-send_error(State, Severity, Message, Extra) ->
+send_error(State, Severity, Message, _Extra) ->
     %% TODO: Handle extras (details, hints, etc.)
     send_packet(State, ?PG_MSGTYPE_ERROR,
                 <<"S", Severity/binary, 0,
