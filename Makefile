@@ -1,3 +1,5 @@
+PSQL=./Postgres/postgresql-8.4.12/src/bin/psql/psql
+
 main: getdeps compile
 
 .PHONY: main getdeps compile test clean run
@@ -25,4 +27,5 @@ run: compile
 	-boot start_sasl -eval 'application:start(egresql).'
 
 
-
+run-client:
+	PGREQUIRESSSL=0 "${PSQL}" -p 7878 -U "${USER}" -h localhost -d dummy
